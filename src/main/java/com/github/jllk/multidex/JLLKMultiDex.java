@@ -32,14 +32,10 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
@@ -51,7 +47,7 @@ import java.util.zip.ZipFile;
  * {@code classes.dex} must contain the classes necessary for calling this
  * class methods. Secondary dex files named classes2.dex, classes3.dex... found
  * in the application apk will be added to the classloader after first call to
- * {@link #install(Context)}.
+ * {@link #install(Context, int)}.
  *
  * <p/>
  * This library provides compatibility for platforms with API level 4 through 20. This library does
@@ -79,19 +75,61 @@ public final class JLLKMultiDex {
     private static final boolean IS_VM_MULTIDEX_CAPABLE =
             isVMMultidexCapable(System.getProperty("java.vm.version"));
 
+    private static int totalDexNum;
+
     private JLLKMultiDex() {}
+
 
     /**
      * Patches the application context class loader by appending extra dex files
      * loaded from the application apk. This method should be called in the
      * attachBaseContext of your {@link Application}, see
-     * {@link JLLKApplication} for more explanation and an example.
      *
      * @param context application context.
      * @throws RuntimeException if an error occurred preventing the classloader
      *         extension.
      */
-    public static void install(Context context) {
+    static void install(Context context) {
+        final int startDexIndex = 2;
+        final int endDexIndex = getTotalDexNumber(context);
+        install(context, startDexIndex, endDexIndex);
+    }
+
+
+    /**
+     * Install dex file from startDexIndex to endDexIndex
+     *
+     * @param context application context.
+     * @param startDexIndex first dex index to install
+     * @param endDexIndex last dex index to install
+     * @throws RuntimeException if an error occurred preventing the classloader
+     *         extension.
+     * */
+    static void install(Context context, int startDexIndex, int endDexIndex) {
+        if (startDexIndex < 2
+            || endDexIndex > getTotalDexNumber(context)
+            || startDexIndex > endDexIndex) {
+            throw new IllegalArgumentException("[JLLKMultiDex] install failed, startDexIndex or endDexIndex is illegal.");
+        }
+        int dexIndex = startDexIndex;
+        while (dexIndex <= endDexIndex) {
+            install(context, dexIndex++);
+        }
+    }
+
+
+    /**
+     * Install dex file by special index
+     *
+     * @param context application context.
+     * @param dexIndex the special index of dexes
+     * @throws RuntimeException if an error occurred preventing the classloader
+     *         extension.
+     */
+    static void install(Context context, int dexIndex) {
+        if (dexIndex < 2 || dexIndex > getTotalDexNumber(context)) {
+            throw new IllegalArgumentException("[JLLKMultiDex] install failed, startDexIndex or endDexIndex is illegal.");
+        }
         Log.i(TAG, "install");
         if (IS_VM_MULTIDEX_CAPABLE) {
             Log.i(TAG, "VM has multidex support, JLLKMultiDex support library is disabled.");
@@ -147,28 +185,28 @@ public final class JLLKMultiDex {
                     // Note, the context class loader is null when running Robolectric tests.
                     Log.e(TAG,
                             "Context class loader is null. Must be running in test mode. "
-                            + "Skip patching.");
+                                    + "Skip patching.");
                     return;
                 }
 
                 try {
-                  clearOldDexDir(context);
+                    clearOldDexDir(context);
                 } catch (Throwable t) {
-                  Log.w(TAG, "Something went wrong when trying to clear old JLLKMultiDex extraction, "
-                      + "continuing without cleaning.", t);
+                    Log.w(TAG, "Something went wrong when trying to clear old JLLKMultiDex extraction, "
+                            + "continuing without cleaning.", t);
                 }
 
                 File dexDir = new File(applicationInfo.dataDir, SECONDARY_FOLDER_NAME);
-                List<File> files = JLLKMultiDexExtractor.load(context, applicationInfo, dexDir, false);
-                if (checkValidZipFiles(files)) {
-                    installSecondaryDexes(loader, dexDir, files);
+                File file = JLLKMultiDexExtractor.load(context, applicationInfo, dexDir, false, dexIndex);
+                if (checkValidZipFile(file)) {
+                    installSecondaryDex(loader, dexDir, file);
                 } else {
                     Log.w(TAG, "Files were not valid zip files.  Forcing a reload.");
                     // Try again, but this time force a reload of the zip file.
-                    files = JLLKMultiDexExtractor.load(context, applicationInfo, dexDir, true);
+                    file = JLLKMultiDexExtractor.load(context, applicationInfo, dexDir, true, dexIndex);
 
-                    if (checkValidZipFiles(files)) {
-                        installSecondaryDexes(loader, dexDir, files);
+                    if (checkValidZipFile(file)) {
+                        installSecondaryDex(loader, dexDir, file);
                     } else {
                         // Second time didn't work, give up
                         throw new RuntimeException("Zip files were not valid.");
@@ -182,6 +220,7 @@ public final class JLLKMultiDex {
         }
         Log.i(TAG, "install done");
     }
+
 
     private static ApplicationInfo getApplicationInfo(Context context)
             throws NameNotFoundException {
@@ -237,31 +276,52 @@ public final class JLLKMultiDex {
         return isMultidexCapable;
     }
 
-    private static void installSecondaryDexes(ClassLoader loader, File dexDir, List<File> files)
+    private static void installSecondaryDex(ClassLoader loader, File dexDir, File file)
             throws IllegalArgumentException, IllegalAccessException, NoSuchFieldException,
             InvocationTargetException, NoSuchMethodException, IOException {
-        if (!files.isEmpty()) {
-            if (Build.VERSION.SDK_INT >= 19) {
-                V19.install(loader, files, dexDir);
-            } else if (Build.VERSION.SDK_INT >= 14) {
-                V14.install(loader, files, dexDir);
-            } else {
-                V4.install(loader, files);
-            }
+        if (Build.VERSION.SDK_INT >= 19) {
+            V19.install(loader, file, dexDir);
+        } else if (Build.VERSION.SDK_INT >= 14) {
+            V14.install(loader, file, dexDir);
+        } else {
+            V4.install(loader, file);
         }
     }
 
-    /**
-     * Returns whether all files in the list are valid zip files.  If {@code files} is empty, then
-     * returns true.
-     */
-    private static boolean checkValidZipFiles(List<File> files) {
-        for (File file : files) {
-            if (!JLLKMultiDexExtractor.verifyZipFile(file)) {
-                return false;
-            }
+    private static boolean checkValidZipFile(File file) {
+        if (!JLLKMultiDexExtractor.verifyZipFile(file)) {
+            return false;
         }
         return true;
+    }
+
+    private static int getTotalDexNumber(Context context) {
+        if (totalDexNum != 0) {
+            return totalDexNum;
+        }
+        else {
+            totalDexNum = JLLKMultiDexExtractor.getTotalDexNum(context);
+            if (totalDexNum == 0) {
+                final ApplicationInfo applicationInfo = context.getApplicationInfo();
+                final File sourceApk = new File(applicationInfo.sourceDir);
+                int dexIndex = 2;
+                try {
+                    ZipFile apk = new ZipFile(sourceApk);
+                    ZipEntry dexFile;
+                    do {
+                        dexFile = apk.getEntry("classes" + dexIndex + ".dex");
+                        dexIndex++;
+                    } while (dexFile != null);
+                } catch (IOException e) {
+                    Log.d(TAG, e.getMessage(), e);
+                }
+                totalDexNum = dexIndex;
+                JLLKMultiDexExtractor.putTotalDexNum(context, totalDexNum);
+                return totalDexNum;
+            } else {
+                return totalDexNum;
+            }
+        }
     }
 
     /**
@@ -371,10 +431,11 @@ public final class JLLKMultiDex {
      */
     private static final class V19 {
 
-        private static void install(ClassLoader loader, List<File> additionalClassPathEntries,
-                File optimizedDirectory)
-                        throws IllegalArgumentException, IllegalAccessException,
-                        NoSuchFieldException, InvocationTargetException, NoSuchMethodException {
+
+        private static void install(ClassLoader loader, File additionalClassPathEntry,
+                                    File optimizedDirectory)
+                throws IllegalArgumentException, IllegalAccessException,
+                NoSuchFieldException, InvocationTargetException, NoSuchMethodException {
             /* The patched class loader is expected to be a descendant of
              * dalvik.system.BaseDexClassLoader. We modify its
              * dalvik.system.DexPathList pathList field to append additional DEX
@@ -383,9 +444,10 @@ public final class JLLKMultiDex {
             Field pathListField = findField(loader, "pathList");
             Object dexPathList = pathListField.get(loader);
             ArrayList<IOException> suppressedExceptions = new ArrayList<IOException>();
+            ArrayList<File> additional = new ArrayList<File>();
+            additional.add(additionalClassPathEntry);
             expandFieldArray(dexPathList, "dexElements", makeDexElements(dexPathList,
-                    new ArrayList<File>(additionalClassPathEntries), optimizedDirectory,
-                    suppressedExceptions));
+                    additional, optimizedDirectory, suppressedExceptions));
             if (suppressedExceptions.size() > 0) {
                 for (IOException e : suppressedExceptions) {
                     Log.w(TAG, "Exception in makeDexElement", e);
@@ -402,7 +464,7 @@ public final class JLLKMultiDex {
                 } else {
                     IOException[] combined =
                             new IOException[suppressedExceptions.size() +
-                                            dexElementsSuppressedExceptions.length];
+                                    dexElementsSuppressedExceptions.length];
                     suppressedExceptions.toArray(combined);
                     System.arraycopy(dexElementsSuppressedExceptions, 0, combined,
                             suppressedExceptions.size(), dexElementsSuppressedExceptions.length);
@@ -436,10 +498,10 @@ public final class JLLKMultiDex {
      */
     private static final class V14 {
 
-        private static void install(ClassLoader loader, List<File> additionalClassPathEntries,
-                File optimizedDirectory)
-                        throws IllegalArgumentException, IllegalAccessException,
-                        NoSuchFieldException, InvocationTargetException, NoSuchMethodException {
+        private static void install(ClassLoader loader, File additionalClassPathEntry,
+                                    File optimizedDirectory)
+                throws IllegalArgumentException, IllegalAccessException,
+                NoSuchFieldException, InvocationTargetException, NoSuchMethodException {
             /* The patched class loader is expected to be a descendant of
              * dalvik.system.BaseDexClassLoader. We modify its
              * dalvik.system.DexPathList pathList field to append additional DEX
@@ -447,8 +509,10 @@ public final class JLLKMultiDex {
              */
             Field pathListField = findField(loader, "pathList");
             Object dexPathList = pathListField.get(loader);
+            ArrayList<File> additional = new ArrayList<File>();
+            additional.add(additionalClassPathEntry);
             expandFieldArray(dexPathList, "dexElements", makeDexElements(dexPathList,
-                    new ArrayList<File>(additionalClassPathEntries), optimizedDirectory));
+                    additional, optimizedDirectory));
         }
 
         /**
@@ -470,34 +534,28 @@ public final class JLLKMultiDex {
      * Installer for platform versions 4 to 13.
      */
     private static final class V4 {
-        private static void install(ClassLoader loader, List<File> additionalClassPathEntries)
-                        throws IllegalArgumentException, IllegalAccessException,
-                        NoSuchFieldException, IOException {
+
+        private static void install(ClassLoader loader, File additionalClassPathEntry)
+                throws IllegalArgumentException, IllegalAccessException,
+                NoSuchFieldException, IOException {
             /* The patched class loader is expected to be a descendant of
              * dalvik.system.DexClassLoader. We modify its
              * fields mPaths, mFiles, mZips and mDexs to append additional DEX
              * file entries.
              */
-            int extraSize = additionalClassPathEntries.size();
-
             Field pathField = findField(loader, "path");
 
             StringBuilder path = new StringBuilder((String) pathField.get(loader));
-            String[] extraPaths = new String[extraSize];
-            File[] extraFiles = new File[extraSize];
-            ZipFile[] extraZips = new ZipFile[extraSize];
-            DexFile[] extraDexs = new DexFile[extraSize];
-            for (ListIterator<File> iterator = additionalClassPathEntries.listIterator();
-                    iterator.hasNext();) {
-                File additionalEntry = iterator.next();
-                String entryPath = additionalEntry.getAbsolutePath();
-                path.append(':').append(entryPath);
-                int index = iterator.previousIndex();
-                extraPaths[index] = entryPath;
-                extraFiles[index] = additionalEntry;
-                extraZips[index] = new ZipFile(additionalEntry);
-                extraDexs[index] = DexFile.loadDex(entryPath, entryPath + ".dex", 0);
-            }
+            String[] extraPaths = new String[1];
+            File[] extraFiles = new File[1];
+            ZipFile[] extraZips = new ZipFile[1];
+            DexFile[] extraDexs = new DexFile[1];
+            String entryPath = additionalClassPathEntry.getAbsolutePath();
+            path.append(':').append(entryPath);
+            extraPaths[0] = entryPath;
+            extraFiles[0] = additionalClassPathEntry;
+            extraZips[0] = new ZipFile(additionalClassPathEntry);
+            extraDexs[0] = DexFile.loadDex(entryPath, entryPath + ".dex", 0);
 
             pathField.set(loader, path.toString());
             expandFieldArray(loader, "mPaths", extraPaths);
