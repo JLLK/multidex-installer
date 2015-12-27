@@ -106,10 +106,14 @@ public final class JLLKMultiDex {
      *         extension.
      * */
     static void install(Context context, int startDexIndex, int endDexIndex) {
-        if (startDexIndex < 2
-            || endDexIndex > getTotalDexNumber(context)
-            || startDexIndex > endDexIndex) {
-            throw new IllegalArgumentException("[JLLKMultiDex] install failed, startDexIndex or endDexIndex is illegal.");
+        if (startDexIndex < 2) {
+            startDexIndex = 2;
+        }
+        if (endDexIndex > getTotalDexNumber(context)) {
+            endDexIndex = getTotalDexNumber(context);
+        }
+        if (startDexIndex > endDexIndex) {
+            throw new IllegalArgumentException("[JLLKMultiDex] install failed, startDexIndex can't be smaller than endDexIndex.");
         }
         int dexIndex = startDexIndex;
         while (dexIndex <= endDexIndex) {
@@ -127,8 +131,10 @@ public final class JLLKMultiDex {
      *         extension.
      */
     static void install(Context context, int dexIndex) {
-        if (dexIndex < 2 || dexIndex > getTotalDexNumber(context)) {
-            throw new IllegalArgumentException("[JLLKMultiDex] install failed, startDexIndex or endDexIndex is illegal.");
+        if (dexIndex < 2) {
+            dexIndex = 2;
+        } else if (dexIndex > getTotalDexNumber(context)) {
+            dexIndex = getTotalDexNumber(context);
         }
         Log.i(TAG, "install");
         if (IS_VM_MULTIDEX_CAPABLE) {
