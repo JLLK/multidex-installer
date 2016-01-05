@@ -136,7 +136,7 @@ public final class JLLKMultiDex {
         } else if (dexIndex > getTotalDexNumber(context)) {
             dexIndex = getTotalDexNumber(context);
         }
-        Log.i(TAG, "install");
+        Log.i(TAG, "install the: " + dexIndex + " dex...");
         if (IS_VM_MULTIDEX_CAPABLE) {
             Log.i(TAG, "VM has multidex support, JLLKMultiDex support library is disabled.");
             return;
@@ -156,9 +156,9 @@ public final class JLLKMultiDex {
 
             synchronized (installedApk) {
                 String apkPath = applicationInfo.sourceDir;
-                if (installedApk.contains(apkPath)) {
-                    return;
-                }
+//                if (installedApk.contains(apkPath)) {
+//                    return;
+//                }
                 installedApk.add(apkPath);
 
                 if (Build.VERSION.SDK_INT > MAX_SUPPORTED_SDK_VERSION) {
@@ -310,18 +310,20 @@ public final class JLLKMultiDex {
             if (totalDexNum == 0) {
                 final ApplicationInfo applicationInfo = context.getApplicationInfo();
                 final File sourceApk = new File(applicationInfo.sourceDir);
+                int dexNum = 0;
                 int dexIndex = 2;
                 try {
                     ZipFile apk = new ZipFile(sourceApk);
                     ZipEntry dexFile;
                     do {
                         dexFile = apk.getEntry("classes" + dexIndex + ".dex");
+                        dexNum++;
                         dexIndex++;
                     } while (dexFile != null);
                 } catch (IOException e) {
                     Log.d(TAG, e.getMessage(), e);
                 }
-                totalDexNum = dexIndex;
+                totalDexNum = dexNum;
                 JLLKMultiDexExtractor.putTotalDexNum(context, totalDexNum);
                 return totalDexNum;
             } else {
